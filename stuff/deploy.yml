@@ -3,8 +3,8 @@
   hosts: servers
   become: yes
   vars:
-    caddy_domain: "cloud1.evan.sh"  # Update with your domain
-    caddy_email: "spam@evan.sh"  # Update with your email
+    caddy_domain: "cloud1.evan.sh"
+    caddy_email: "spam@evan.sh" 
 
   tasks:
     - name: Install Docker dependencies
