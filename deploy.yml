@@ -1,0 +1,136 @@
+---
+- name: Deploy containers with Docker
+  hosts: servers
+  become: yes
+
+  tasks:
+    - name: Install Docker dependencies
+      apt:
+        name: 
+          - docker.io
+          - docker-compose
+          - python3-pip
+        state: present
+        update_cache: yes
+
+    - name: Install Docker Compose plugin
+      shell: |
+        DOCKER_CONFIG=${DOCKER_CONFIG:-$HOME/.docker}
+        mkdir -p $DOCKER_CONFIG/cli-plugins
+        curl -SL https://github.com/docker/compose/releases/download/v2.33.1/docker-compose-linux-x86_64 -o $DOCKER_CONFIG/cli-plugins/docker-compose
+        chmod +x $DOCKER_CONFIG/cli-plugins/docker-compose
+
+    - name: Ensure Docker service is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Create deployment directory
+      file:
+        path: /opt/deployment
+        state: directory
+        mode: '0755'
+
+    - name: Copy requirements directory
+      synchronize:
+        src: ./requirements/
+        dest: /opt/deployment/requirements/
+        mode: push
+        recursive: yes
+        delete: yes
+
+    - name: Copy configuration files
+      copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { src: '.env', dest: '/opt/deployment/.env', mode: '0644' }
+        - { src: 'docker-compose.yml', dest: '/opt/deployment/docker-compose.yml', mode: '0644' }
+
+    - name: Create required directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /opt/deployment/requirements/wordpress/conf
+        - /opt/deployment/requirements/mariadb/conf
+        - /opt/deployment/requirements/nginx/conf
+        - /opt/deployment/requirements/phpmyadmin/conf
+
+    - name: Copy configuration files
+      copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { src: './requirements/mariadb/conf/my.cnf', dest: '/opt/deployment/requirements/mariadb/conf/my.cnf', mode: '0644' }
+        - { src: './requirements/nginx/conf/nginx.conf', dest: '/opt/deployment/requirements/nginx/conf/nginx.conf', mode: '0644' }
+        - { src: './requirements/phpmyadmin/conf/config.inc.php', dest: '/opt/deployment/requirements/phpmyadmin/conf/config.inc.php', mode: '0644' }
+        - { src: './requirements/wordpress/tools/init_wp.sh', dest: '/opt/deployment/requirements/wordpress/tools/init_wp.sh', mode: '0755' }
+        - { src: './requirements/mariadb/tools/init_db.sh', dest: '/opt/deployment/requirements/mariadb/tools/init_db.sh', mode: '0755' }
+
+    - name: Create systemd service for docker-compose
+      copy:
+        dest: /etc/systemd/system/docker-compose-app.service
+        content: |
+          [Unit]
+          Description=Docker Compose Application Service
+          Requires=docker.service
+          After=docker.service
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          WorkingDirectory=/opt/deployment
+          ExecStart=/usr/bin/docker compose up -d
+          ExecStop=/usr/bin/docker compose down
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Create certificate renewal script
+      copy:
+        dest: /opt/deployment/renew-certs.sh
+        content: |
+          #!/bin/sh
+          docker compose exec certbot certbot renew --webroot --webroot-path=/var/www/certbot
+          docker compose exec nginx nginx -s reload
+        mode: '0755'
+
+    - name: Add certificate renewal cron job
+      cron:
+        name: "Renew SSL certificates"
+        job: "/opt/deployment/renew-certs.sh"
+        special_time: daily
+        state: present
+
+    - name: Start and enable docker-compose service
+      systemd:
+        name: docker-compose-app
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Deploy with docker-compose
+      community.docker.docker_compose_v2:
+        project_src: /opt/deployment
+        state: present
+
+    - name: Configure firewall
+      ufw:
+        rule: "{{ item.rule }}"
+        port: "{{ item.port }}"
+        proto: tcp
+        state: enabled
+      loop:
+        - { rule: 'allow', port: '22' }
+        - { rule: 'allow', port: '80' }
+        - { rule: 'allow', port: '443' }
+
+    - name: Enable UFW with default deny
+      ufw:
+        state: enabled
+        default: deny
