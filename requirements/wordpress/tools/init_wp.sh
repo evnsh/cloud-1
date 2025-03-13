@@ -33,4 +33,4 @@ else
 fi
 
 echo "[!] Starting"
-php-fpm82 -F -R
+php-fpm83 -F -R

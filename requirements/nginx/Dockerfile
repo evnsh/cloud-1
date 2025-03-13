@@ -1,13 +1,14 @@
-FROM alpine:3.19.1
+FROM nginx:alpine
 
-RUN apk update
-RUN apk --no-cache add nginx
+# Install envsubst
+RUN apk add --no-cache gettext
 
-RUN mkdir -p /run/nginx /var/www/wordpress /var/www/certbot
+# Copy Nginx configuration template
+COPY conf/nginx.conf.template /etc/nginx/nginx.conf.template
 
-COPY conf/nginx.conf /etc/nginx/nginx.conf
-RUN chmod -R 755 /var/www/wordpress
+# Create entrypoint script
+COPY docker-entrypoint.sh /
+RUN chmod +x /docker-entrypoint.sh
 
-EXPOSE 80 443
-
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]

@@ -9,14 +9,6 @@ services:
     volumes:
       - mariadb_data:/var/lib/mysql
 
-  certbot:
-    image: certbot/certbot
-    container_name: certbot
-    volumes:
-      - letsencrypt:/etc/letsencrypt
-      - certbot_www:/var/www/certbot
-    command: certonly --webroot --webroot-path=/var/www/certbot --email me@evan.sh --agree-tos --no-eff-email -d cloud1.evan.sh
-
   phpmyadmin:
     build: ./requirements/phpmyadmin
     container_name: phpmyadmin
@@ -31,18 +23,20 @@ services:
     container_name: nginx
     restart: on-failure
     env_file: .env
+    environment:
+      - DOMAIN_NAME=${DOMAIN_NAME}
+      - PMA_DOMAIN=${PMA_DOMAIN}
     ports:
       - "443:443"
+      - "80:80"
     networks:
       - inception
     depends_on:
       - wordpress
       - phpmyadmin
-      - certbot
     volumes:
       - wordpress_data:/var/www/wordpress
-      - letsencrypt:/etc/letsencrypt:ro
-      - certbot_www:/var/www/certbot
+      - ./ssl:/etc/nginx/ssl:ro
 
   wordpress:
     build: ./requirements/wordpress
@@ -64,8 +58,4 @@ volumes:
   mariadb_data:
     driver: local
   wordpress_data:
-    driver: local
-  letsencrypt:
-    driver: local
-  certbot_www:
     driver: local

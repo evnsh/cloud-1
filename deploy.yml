@@ -10,6 +10,7 @@
           - docker.io
           - docker-compose
           - python3-pip
+          - openssl
         state: present
         update_cache: yes
 
@@ -59,6 +60,7 @@
         - /opt/deployment/requirements/mariadb/conf
         - /opt/deployment/requirements/nginx/conf
         - /opt/deployment/requirements/phpmyadmin/conf
+        - /opt/deployment/ssl
 
     - name: Copy configuration files
       copy:
@@ -71,6 +73,25 @@
         - { src: './requirements/phpmyadmin/conf/config.inc.php', dest: '/opt/deployment/requirements/phpmyadmin/conf/config.inc.php', mode: '0644' }
         - { src: './requirements/wordpress/tools/init_wp.sh', dest: '/opt/deployment/requirements/wordpress/tools/init_wp.sh', mode: '0755' }
         - { src: './requirements/mariadb/tools/init_db.sh', dest: '/opt/deployment/requirements/mariadb/tools/init_db.sh', mode: '0755' }
+
+    - name: Generate self-signed SSL certificates
+      shell: |
+        # Main domain certificate
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+          -keyout /opt/deployment/ssl/nginx.key \
+          -out /opt/deployment/ssl/nginx.crt \
+          -subj "/C=FR/ST=IDF/L=Paris/O=42/CN=${DOMAIN_NAME}"
+
+        # phpMyAdmin subdomain certificate
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+          -keyout /opt/deployment/ssl/pma.key \
+          -out /opt/deployment/ssl/pma.crt \
+          -subj "/C=FR/ST=IDF/L=Paris/O=42/CN=${PMA_DOMAIN}"
+      args:
+        creates: /opt/deployment/ssl/nginx.crt
+      environment:
+        DOMAIN_NAME: "{{ lookup('env', 'DOMAIN_NAME') }}"
+        PMA_DOMAIN: "{{ lookup('env', 'PMA_DOMAIN') }}"
 
     - name: Create systemd service for docker-compose
       copy:
@@ -90,22 +111,6 @@
 
           [Install]
           WantedBy=multi-user.target
-
-    - name: Create certificate renewal script
-      copy:
-        dest: /opt/deployment/renew-certs.sh
-        content: |
-          #!/bin/sh
-          docker compose exec certbot certbot renew --webroot --webroot-path=/var/www/certbot
-          docker compose exec nginx nginx -s reload
-        mode: '0755'
-
-    - name: Add certificate renewal cron job
-      cron:
-        name: "Renew SSL certificates"
-        job: "/opt/deployment/renew-certs.sh"
-        special_time: daily
-        state: present
 
     - name: Start and enable docker-compose service
       systemd:
